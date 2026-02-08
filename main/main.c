@@ -2,6 +2,11 @@
 #include "freertos/FreeRTOS.h"
 #include "driver/gpio.h"
 #include "esp_adc/adc_oneshot.h"
+#include <freertos/task.h>
+#include <sys/time.h>
+#include <hd44780.h>
+#include <esp_idf_lib_helpers.h>
+#include <inttypes.h>
 
 #define POT_CHANNEL ADC_CHANNEL_7
 #define MODE_CHANNEL ADC_CHANNEL_2
@@ -21,14 +26,13 @@
 #define BUZZER GPIO_NUM_11
 #define IGNITION GPIO_NUM_12
 
-#define SHORT_DELAY GPIO_NUM_15
-#define MED_DELAY GPIO_NUM_16
-#define LONG_DELAY GPIO_NUM_17
+#define OFF  1023
+#define LOW  2046
+#define HI 3069
 
-#define POT_OFF  1023
-#define POT_LOW  2046
-#define POT_HI 3069
-#define POT_INT 4095
+#define SHORT_MODE 1365
+#define MED_MODE 2730
+
 
 #define LEDC_TIMER              LEDC_TIMER_0
 #define LEDC_MODE               LEDC_LOW_SPEED_MODE
@@ -69,6 +73,7 @@ static void example_ledc_init(void)
         .hpoint         = 0
     };
 ledc_channel_config(&ledc_channel);
+
 }
 
 void app_main(void)
@@ -140,11 +145,13 @@ void app_main(void)
     bool ignition_enabled= false;  //Indicates ignition readiness
     bool engine_running = false;   //Indicates engine running
 
-    bool mode = false;
     bool s_delay, m_delay, l_delay;
     bool last_ignit = false;
 
     bool welcome_not_shown = true;  //Ensures welcome message prints once
+
+    char mode;
+    char delay;
 
     // Set the LEDC peripheral configuration
     example_ledc_init();
@@ -213,9 +220,6 @@ void app_main(void)
                 if (!p_belt){
                     printf("Passenger's seatbelt not fastened\n");
                 }
-                
-                //delay_ms(500);
-                //gpio_set_level(BUZZER,0);
             }
         }
     }
@@ -233,13 +237,15 @@ void app_main(void)
 
             //WINDSHIELD SUBSYSTEM
             //OFF mode
-            if (pot_bits > 0 && pot_bits < 1023) {
+            if (pot_bits < OFF) {
+                mode = "OFF";
                 ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, LEDC_DUTY_MIN);
                 ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
                 vTaskDelay(700 /portTICK_PERIOD_MS);  
             }
             //LOW mode
-            else if (pot_bits >1023 && pot_bits < 2046) {
+            else if (pot_bits >= OFF && pot_bits < LOW) {
+                mode = 'LOW';
                 ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, LEDC_DUTY_LOW);
                 ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
                 vTaskDelay(700 /portTICK_PERIOD_MS);
@@ -248,8 +254,8 @@ void app_main(void)
             }
 
             //HIGH mode 
-            else if (pot_bits >1023 && pot_bits < 2046) {
-                
+            else if (pot_bits >= LOW && pot_bits < HI) {
+                mode = "HIGH";
                 ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, LEDC_DUTY_MAX);
                 ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
                 vTaskDelay(700 /portTICK_PERIOD_MS);
@@ -257,25 +263,26 @@ void app_main(void)
                 ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
 
             else {
+                mode = "INTERMITENT";
                 if (){
                     ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, LEDC_DUTY_MIN);
                     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
                 }
                 //INTERMITENT MODE
-                if (mode_bits >= 0 && mode_bits < 1365){
-                    mode = true;
+                if (mode_bits >= 0 && mode_bits < SHORT_MODE){
+                    char = "short";
                     vTaskDelay(1000/portTICK_PERIOD_MS);
                     ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, LEDC_DUTY_LOW);
                     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
                 }
-                else if (mode_bits >= 1365 && mode_bits < 2730){
-                    mode = true;
+                else if (mode_bits >= SHORT_MODE && mode_bits < MED_MODE){
+                    char = "medium"
                     vTaskDelay(3000/portTICK_PERIOD_MS);
                     ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, LEDC_DUTY_LOW);
                     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
                 }
                 else {
-                    mode = true;
+                    char = "long";
                     vTaskDelay(5000/portTICK_PERIOD_MS);
                     ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, LEDC_DUTY_LOW);
                     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
@@ -286,4 +293,89 @@ void app_main(void)
             vTaskDelay(25/portTICK_PERIOD_MS);
         }
     }
+}
+
+// LCD DISPLAY
+static uint32_t get_time_sec()
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return tv.tv_sec;
+}
+
+static const uint8_t char_data[] =
+{
+    0x04, 0x0e, 0x0e, 0x0e, 0x1f, 0x00, 0x04, 0x00,
+    0x1f, 0x11, 0x0a, 0x04, 0x0a, 0x11, 0x1f, 0x00
+};
+
+void lcd_display (void *pvMode)
+{
+    hd44780_t lcd =
+    {
+        .write_cb = NULL,
+        .font = HD44780_FONT_5X8,
+        .lines = 2,
+        .pins = {
+            .rs = GPIO_NUM_38,
+            .e  = GPIO_NUM_37,
+            .d4 = GPIO_NUM_36,
+            .d5 = GPIO_NUM_35,
+            .d6 = GPIO_NUM_48,
+            .d7 = GPIO_NUM_47,
+            .bl = HD44780_NOT_USED
+        }
+    };
+
+    ESP_ERROR_CHECK(hd44780_init(&lcd));
+
+    hd44780_upload_character(&lcd, 0, char_data);
+    hd44780_upload_character(&lcd, 1, char_data + 8);
+    hd44780_gotoxy(&lcd, 0, 0);
+    hd44780_puts(&lcd, "\x08 WIPER SELCTION");
+       
+    }
+
+    char time[20];
+       while (1)
+    {
+        if (mode == "OFF"){
+        hd44780_gotoxy(&lcd, 0, 0);
+        hd44780_puts(&lcd, "\x08 OFF");
+    }
+    else if (mode == "LOW"){
+        hd44780_gotoxy(&lcd, 0, 0);
+        hd44780_puts(&lcd, "\x08 LOW");
+    }
+    else if (mode == "HIGH"){
+        hd44780_gotoxy(&lcd, 0, 0);
+        hd44780_puts(&lcd, "\x08 HIGH");
+    }
+    else{
+        hd44780_gotoxy(&lcd, 0, 0);
+        hd44780_puts(&lcd, "\x08 INTERMITENT");
+       
+        if (delay = "short"){
+            hd44780_gotoxy(&lcd, 1, 0);
+            hd44780_puts(&lcd, "\x09 SHORT");
+        }
+        else if (delay = "medium"){
+            hd44780_gotoxy(&lcd, 1, 0);
+            hd44780_puts(&lcd, "\x09 MEDIUM")
+        }
+        else{
+            hd44780_gotoxy(&lcd, 1, 0);
+            hd44780_puts(&lcd, "\x09 LONG")
+        }
+        hd44780_gotoxy(&lcd, 1, 1);
+        hd44780_puts(&lcd, "\x09 DELAY")
+        
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+void app_main()
+{
+    xTaskCreate(lcd_test, "lcd_test", configMINIMAL_STACK_SIZE * 3, NULL, 5, NULL);
+}
 
