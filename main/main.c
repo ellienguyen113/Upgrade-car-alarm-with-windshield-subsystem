@@ -150,9 +150,6 @@ void app_main(void)
 
     bool welcome_not_shown = true;  //Ensures welcome message prints once
 
-    char mode;
-    char delay;
-
     // Set the LEDC peripheral configuration
     example_ledc_init();
     // Set duty to 2.8% (0 degrees)
@@ -238,14 +235,14 @@ void app_main(void)
             //WINDSHIELD SUBSYSTEM
             //OFF mode
             if (pot_bits < OFF) {
-                mode = "OFF";
+                
                 ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, LEDC_DUTY_MIN);
                 ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
                 vTaskDelay(700 /portTICK_PERIOD_MS);  
             }
             //LOW mode
             else if (pot_bits >= OFF && pot_bits < LOW) {
-                mode = 'LOW';
+            
                 ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, LEDC_DUTY_LOW);
                 ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
                 vTaskDelay(700 /portTICK_PERIOD_MS);
@@ -255,7 +252,7 @@ void app_main(void)
 
             //HIGH mode 
             else if (pot_bits >= LOW && pot_bits < HI) {
-                mode = "HIGH";
+            
                 ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, LEDC_DUTY_MAX);
                 ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
                 vTaskDelay(700 /portTICK_PERIOD_MS);
@@ -270,19 +267,18 @@ void app_main(void)
                 }
                 //INTERMITENT MODE
                 if (mode_bits >= 0 && mode_bits < SHORT_MODE){
-                    char = "short";
+    
                     vTaskDelay(1000/portTICK_PERIOD_MS);
                     ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, LEDC_DUTY_LOW);
                     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
                 }
                 else if (mode_bits >= SHORT_MODE && mode_bits < MED_MODE){
-                    char = "medium"
+
                     vTaskDelay(3000/portTICK_PERIOD_MS);
                     ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, LEDC_DUTY_LOW);
                     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
                 }
                 else {
-                    char = "long";
                     vTaskDelay(5000/portTICK_PERIOD_MS);
                     ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, LEDC_DUTY_LOW);
                     ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
@@ -294,14 +290,20 @@ void app_main(void)
         }
     }
 }
+//wiper control
+volatile wiper_mode_t mode;
+volatile delay_t delay;
+volatile wiper_state_t wiper_state;
 
-// LCD DISPLAY
-static uint32_t get_time_sec()
+void wiper_task(void *arg)
 {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return tv.tv_sec;
+    while (1){
+        
+
+    }
+
 }
+// LCD DISPLAY
 
 static const uint8_t char_data[] =
 {
@@ -376,6 +378,6 @@ void lcd_display (void *pvMode)
 
 void app_main()
 {
-    xTaskCreate(lcd_test, "lcd_test", configMINIMAL_STACK_SIZE * 3, NULL, 5, NULL);
+    xTaskCreate(lcd_display, "lcd_display", configMINIMAL_STACK_SIZE * 3, NULL, 5, NULL);
 }
 
