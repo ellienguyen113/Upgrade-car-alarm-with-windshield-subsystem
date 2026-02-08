@@ -1,0 +1,17 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.openOcdConfigs": [
+    "board/esp32s3-builtin.cfg"
+  ],
+  "idf.portWin": "COM6",
+  "idf.currentSetup": "c:\\Espressif\\frameworks\\esp-idf-v5.5.2",
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32s3"
+  },
+  "clangd.path": "c:\\Espressif\\frameworks\\esp-idf-v5.5.2\\.git\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=c:\\Users\\admin\\esp\\Upgrade car alarm with windshield subsystem\\build"
+  ]
+}
