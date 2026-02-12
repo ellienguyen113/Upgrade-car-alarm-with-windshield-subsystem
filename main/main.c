@@ -1,6 +1,8 @@
+
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 #include "esp_adc/adc_oneshot.h"
 #include <freertos/task.h>
 #include <sys/time.h>
@@ -9,14 +11,6 @@
 #include <inttypes.h>
 
 typedef struct {
-    adc_channel_t wiper_channel;
-    adc_channel_t delay_channel;
-    adc_atten_t atten;
-    adc_bitwidth_t bitwidth;
-    uint32_t num_samples;
-}
-adc_config_t;
-typedef struct {
     gpio_num_t driver_seat;
     gpio_num_t passenger_seat;
     gpio_num_t driver_seatbelt;
@@ -24,28 +18,12 @@ typedef struct {
     gpio_num_t ignition_button;
 }
 input_pins_t;
-
 typedef struct{
     gpio_num_t ignition_led;
     gpio_num_t engine_led;
     gpio_num_t buzzer;
 }
 output_pins_t;
-
-typedef struct{
-    ledc_timer_t timer;
-    ledc_mode_t speed_mode;
-    ledc_channel_t channel;
-    gpio_num_t gpio;
-    ledc_timer_bit_t resolution;
-    uint32_t freq_hz;
-
-    uint32_t duty_min;
-    uint32_t duty_max;
-    uint32_t duty_mid;
-}
-servo_pwm_t;
-
 typedef struct {
     bool dseat;
     bool pseat;
@@ -56,13 +34,6 @@ typedef struct {
 inputs_state_t;
 
 //Initialize
-const adc_config_t adc_cfg = {
-    .wiper_channel = ADC_CHANNEL_1,
-    .delay_channel = ADC_CHANNEL_2,
-    .atten = ADC_ATTEN_DB_12,
-    .bitwidth = ADC_BITWIDTH_12,
-    .num_samples = 1000
-};
 
 const input_pins_t inputs = {
     .driver_seat = GPIO_NUM_4,
@@ -76,14 +47,6 @@ const output_pins_t outputs = {
     .engine_led = GPIO_NUM_10,
     .buzzer = GPIO_NUM_11
 };
-const servo_pwm_t steering_servo = {
-    .timer = LEDC_TIMER_0,
-    .speed_mode = LEDC_LOW_SPEED_MODE,
-    .channel = LEDC_CHANNEL_0,
-    .gpio = GPIO_NUM_5,
-    .resolution = LEDC_TIMER_13_BIT,
-    .freq_hz     = 50,
-}
 
 static void init_gpio(const input_pins_t *in, const output_pins_t *out){
     gpio_config_t io_conf = {0};
@@ -108,7 +71,7 @@ typedef enum {
     wiper_off,
     wiper_low,
     wiper_high,
-    wiper_intermitten
+    wiper_intermittent
 }
 wiper_mode_t;
 typedef enum{
@@ -131,14 +94,14 @@ wiper_mode_t decode_wiper_mode(uint16_t mode_adc){
         return wiper_high;
     }
      else {
-        return wiper_intermitten;
+        return wiper_intermittent;
     }
 }
 //Read delay from pot2 when mode = intermittent
 #define THRESH_SHORT 1365
 #define THRESH_MED 2730
 delay_mode_t decode_delay_mode(uint16_t delay_adc){
-    if (delay_adc < SHORT_DELAY){
+    if (delay_adc < THRESH_SHORT){
         return delay_short;
     }
     else if (delay_adc < THRESH_MED){
@@ -148,56 +111,45 @@ delay_mode_t decode_delay_mode(uint16_t delay_adc){
         return delay_long;
     }
 }
+#define LEDC_TIMER              LEDC_TIMER_0
+#define LEDC_MODE               LEDC_LOW_SPEED_MODE
+#define LEDC_OUTPUT_IO          (8)
+#define LEDC_CHANNEL            LEDC_CHANNEL_0
+#define LEDC_DUTY_RES           LEDC_TIMER_13_BIT // Set duty resolution to 13 bits
+#define LEDC_FREQUENCY          (50) // Frequency in Hertz. 
+#define SERVO_DUTY_OFF           ((8191*0.028)) // Set duty to 3.75%.
+#define SERVO_DUTY_LOW           ((8191*0.075)) // Set duty to 9.25%.
+#define SERVO_DUTY_HIGH          ((8191*0.1196)) // Set duty to 14.65%.
 
 static void servo_pwm_init(void);
-static void servo_pwm_init(const servo_pwm_t *cfg)
+static void servo_pwm_init(void)
 {
     // Prepare and then apply the LEDC PWM timer configuration
     ledc_timer_config_t timer_cfg = {
-        .speed_mode       = cfg ->speed_mode,
-        .duty_resolution  = cfg->resolution,
-        .timer_num        = cfg->timer,
-        .freq_hz          = cfg->freq_hz, 
+        .speed_mode       = LEDC_MODE,
+        .duty_resolution  = LEDC_DUTY_RES,
+        .timer_num        = LEDC_TIMER,
+        .freq_hz          = LEDC_FREQUENCY, 
         .clk_cfg          = LEDC_AUTO_CLK
     };
     ESP_ERROR_CHECK(ledc_timer_config(&timer_cfg));
 
     // Prepare and then apply the LEDC PWM channel configuration
     ledc_channel_config_t channel_cfg = {
-        .speed_mode     = cfg->speed_mode,
-        .channel        = cfg->channel,
-        .timer_sel      = cfg->timer,
+        .speed_mode     = LEDC_MODE,
+        .channel        = LEDC_CHANNEL,
+        .timer_sel      = LEDC_TIMER,
         .intr_type      = LEDC_INTR_DISABLE,
-        .gpio_num       = cfg->gpio,
+        .gpio_num       = LEDC_OUTPUT_IO,
         .duty           = 0,
         .hpoint         = 0
     };
     ESP_ERROR_CHECK(ledc_channel_config(&channel_cfg));
 }
-#define SERVO_DUTY_OFF   ((uint32_t)(8191 * 0.028f))
-#define SERVO_DUTY_LOW   ((uint32_t)(8191 * 0.075f))
-#define SERVO_DUTY_HIGH  ((uint32_t)(8191 * 0.1196f))
-
-static void servo_set_duty(uint32_t duty)
+    static void servo_set_duty(uint32_t duty)
 {
     ledc_set_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,duty);
     ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0);
-}
-static adc_oneshot_unit_handle_t adc1_handle;
-static void init_adc(const adc_config_t *cfg)
-{
-    adc_oneshot_unit_init_cfg_t init_config = {
-        .unit_id = ADC_UNIT_2,
-    };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config, &adc1_handle));
-
-    adc_oneshot_chan_cfg_t chan_config = {
-        .atten = cfg-> ADC_ATTEN,
-        .bitwidth = cfg ->BITWIDTH
-    };
-
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, cfg->pot_channel, &chan_config));
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, cfg->mode_channel, &chan_config));
 }
 
 static void read_inputs (inputs_state_t *state, const input_pins_t *pins){
@@ -207,117 +159,14 @@ static void read_inputs (inputs_state_t *state, const input_pins_t *pins){
     state -> pbelt = (gpio_get_level(pins->passenger_seatbelt)==0);
     state -> ignition_button = (gpio_get_level(pins->ignition_button)==0);
 }
-void app_main(void)
-{
-    int pot_bits;
-    int mode_bits;
 
-    init_gpio(&inputs, &outputs);
-    init_adc(&adc_cfg);
-    servo_pwm_init(&steering_servo);
-    inputs_state_t input_state = {0};
-    lcd_init_once(); 
+#define ADC_CHANNEL_WIPER     ADC_CHANNEL_2
+#define ADC_CHANNEL_DELAY    ADC_CHANNEL_3
+#define ADC_ATTEN       ADC_ATTEN_DB_12
+#define BITWIDTH        ADC_BITWIDTH_12
+#define NUM_SAMPLES     1000                // Number of samples
 
-    bool ignition_enabled= false;  //Indicates ignition readiness
-    bool engine_running = false;   //Indicates engine running
-    bool last_ignit = false;
-    bool welcome_not_shown = true;  //Ensures welcome message prints once
-    while(1){
-        read_inputs(&input_state, &inputs);
-        // STAGE 1: ENGINE NOT RUNNING
-        if (!engine_running){
-            //Welcome message
-            if (input_state.dseat && welcome_not_shown) {
-                printf("Welcome to enhanced alarm system model 218-W26\n");
-                welcome_not_shown = false;
-            }
-            // Ignition enabled
-            if (inputs.dseat&& pseat && inputs.dbelt && inputs.pbelt){
-                ignition_enabled = true;
-                gpio_set_level(outputs.ignition_led,1);
-            }
-            else {
-                ignition_enabled = false;
-                gpio_set_level(outputs.ignition_led,0);
-            }
-            //Ignition pressed
-            if (inputs.ignition_button && !last_ignit){
-                // Case 1: All safety conditions met
-                if (ignition_enabled){
-                    engine_running = true;
-                    gpio_set_level(outputs.engine_led,1);
-                    gpio_set_level(outputs.ignition_led,0);
-                    printf("Engine started\n");
-                }
-                // Case 2: Safety conditions not met
-                else {
-                    gpio_set_level(outputs.buzzer, 1);
-                    printf("Ignition inhibited\n");
-
-                if (!inputs.dseat){
-                    printf("Driver seat not occupied\n");
-                }
-                    
-                if (!inputs.pseat){
-                    printf("Passenger seat not occupied\n");
-                }
-                if (!inputs.dbelt){
-                    printf("Driver's seatbelt not fastened\n");
-                }
-                if (!inputs.pbelt){
-                    printf("Passenger's seatbelt not fastened\n");
-                }
-            }
-            uint16_t mode_adc;
-            uint16_t delay_adc;
-            adc_oneshot_read
-            (adc1_handle, adc_cfg.wiper_channel, &mode_adc);
-            wiper_mode_t wiper_mode = decode_wiper_mode(mode_adc);
-            adc_oneshot_read
-            (adc1_handle, adc_cfg.delay_channel, &delay_adc);
-            delay_mode_t delay_mode = decode_delay_mode(delay_adc);
-            
-            //STAGE 2: ENGINE RUNNING
-            else{   
-                //STOP ENGINE
-                if (inputs.ignition && !last_ignit){
-                    engine_running = false;
-                    ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, LEDC_DUTY_MIN);
-                    ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
-                    gpio_set_level(ENGINE_LED, 0);
-                    printf("car stopped\n");
-                }
-                //WINDSHIELD 
-                switch(wiper_mode){
-                    case wiper_off:
-                    servo_set_duty(SERVO_DUTY_OFF);
-                    break;
-                    case wiper_low:
-                    servo_set_duty(SERVO_DUTY_LOW);
-                    break;
-                    case wiper_high:
-                    servo_set_duty(SERVO_DUTY_HIGH);
-                    break;
-                    case wiper_intermittent:
-                    servo_set_duty(SERVO_DUTY_LOW);
-                    handle_delay(delay_mode);
-                    lcd_show_intermittent(&lcd, delay);
-                    break;
-                }
-            }
-                last_ignit = input_state.ignition_button;
-                vTaskDelay(25/portTICK_PERIOD_MS);
-            }
-        }
-    }
-}
 // LCD DISPLAY
-
-static const uint8_t char_data[] =
-{
-    0x04, 0x0e, 0x0e, 0x0e, 0x1f, 0x00, 0x04, 0x00,
-    0x1f, 0x11, 0x0a, 0x04, 0x0a, 0x11, 0x1f, 0x00
-};
 
 static hd44780_t lcd = {
     .write_cb = NULL,
@@ -346,14 +195,150 @@ static const char *delay_show(delay_mode_t d){
         return "MEDIUM DELAY 3S";
         case delay_long:
         return "LONG DELAY 5S";
+        default: return "";
     }
-}
-static void lcd_intermisttent (hd44780_t *lcd, delay_mode_t delay){
+};
+static void lcd_intermittent (hd44780_t *lcd, delay_mode_t delay){
     hd44780_clear(lcd);
     hd44780_gotoxy(lcd, 0,0);
-    hd44780_puts(lcd, "INTERMITTENT")
+    hd44780_puts(lcd, "INTERMITTENT");
 
     hd44780_gotoxy(lcd, 0,1);
-    hd44780_puts(lcd, "DELAY: ")
-    hd44780_puts(lcd, "delay_show(delay)")
+    hd44780_puts(lcd, "DELAY: ");
+    hd44780_puts(lcd, delay_show(delay));
 }
+
+void app_main(void)
+{
+    adc_oneshot_unit_init_cfg_t init_config = {
+        .unit_id = ADC_UNIT_2,
+    };                                                  // Unit configuration
+    adc_oneshot_unit_handle_t adc_handle;              // Unit handle
+    adc_oneshot_new_unit(&init_config, &adc_handle);  // Populate unit handle
+   
+    adc_oneshot_chan_cfg_t config = {
+        .atten = ADC_ATTEN,
+        .bitwidth = BITWIDTH
+    };                                                  // Channel config
+    adc_oneshot_config_channel(adc_handle, ADC_CHANNEL_WIPER, &config);
+    adc_oneshot_config_channel(adc_handle, ADC_CHANNEL_DELAY, &config);
+
+
+    init_gpio(&inputs, &outputs);
+    inputs_state_t input_state = {0};
+    lcd_init_once();
+    servo_pwm_init();
+
+    bool ignition_enabled= false;  //Indicates ignition readiness
+    bool engine_running = false;   //Indicates engine running
+    bool last_ignit = false;
+    bool welcome_not_shown = true;  //Ensures welcome message prints once
+    bool wiper_active = false;
+    while(1){
+        read_inputs(&input_state, &inputs);
+        int wiper_bits;                                   // ADC reading (bits)
+        adc_oneshot_read(adc_handle, ADC_CHANNEL_WIPER, &wiper_bits);      
+
+        int delay_bits;                                   // ADC reading (bits)
+        adc_oneshot_read(adc_handle, ADC_CHANNEL_DELAY, &delay_bits);     
+
+        wiper_mode_t wiper_mode = decode_wiper_mode(wiper_bits);
+        delay_mode_t delay_mode = decode_delay_mode(delay_bits);
+       
+        // STAGE 1: ENGINE NOT RUNNING
+        if (!engine_running){
+            //Welcome message
+            if (input_state.dseat && welcome_not_shown) {
+                printf("Welcome to enhanced alarm system model 218-W26\n");
+                welcome_not_shown = false;
+            }
+            // Ignition enabled
+            if (input_state.dseat&& input_state.pseat && input_state.dbelt && input_state.pbelt){
+                ignition_enabled = true;
+                gpio_set_level(outputs.ignition_led,1);
+            }
+            else {
+                ignition_enabled = false;
+                gpio_set_level(outputs.ignition_led,0);
+            }
+        
+            //Ignition pressed
+            if (input_state.ignition_button && !last_ignit){
+                // Case 1: All safety conditions met
+                if (ignition_enabled){
+                    engine_running = true;
+                    gpio_set_level(outputs.engine_led,1);
+                    gpio_set_level(outputs.ignition_led,0);
+                    printf("Engine started\n");
+                }
+                // Case 2: Safety conditions not met
+                else {
+                    gpio_set_level(outputs.buzzer, 1);
+                    printf("Ignition inhibited\n");
+                    if (!input_state.dseat){
+                        printf("Driver seat not occupied\n");
+                    }
+                    
+                    if (!input_state.pseat){
+                        printf("Passenger seat not occupied\n");
+                    }
+                    if (!input_state.dbelt){
+                        printf("Driver's seatbelt not fastened\n");
+                    }
+                    if (!input_state.pbelt){
+                        printf("Passenger's seatbelt not fastened\n");
+                    }
+                }
+            }
+    
+            //STAGE 2: ENGINE RUNNING
+            else {   
+                //STOP ENGINE
+                if (input_state.ignition_button && !last_ignit){
+                    engine_running = false;
+                    if (wiper_active){
+                        servo_set_duty(SERVO_DUTY_HIGH);
+                        vTaskDelay(300 / portTICK_PERIOD_MS);
+                        servo_set_duty(SERVO_DUTY_OFF);
+                    }
+                    servo_set_duty(SERVO_DUTY_OFF);
+                    gpio_set_level(outputs.engine_led,0);
+                }            
+                //WINDSHIELD 
+                switch(wiper_mode){
+                    case wiper_off:
+                    wiper_active = false;
+                    servo_set_duty(SERVO_DUTY_OFF);
+                    break;
+                    case wiper_low:
+                    wiper_active = true;
+                    servo_set_duty(SERVO_DUTY_LOW);
+                    break;
+                    case wiper_high:
+                    wiper_active = true;
+                    servo_set_duty(SERVO_DUTY_HIGH);
+                    break;
+                    case wiper_intermittent:
+                    wiper_active = true;
+                    servo_set_duty(SERVO_DUTY_LOW);
+                    lcd_intermittent(&lcd, delay_mode);
+                    switch(delay_mode){
+                        case delay_short:
+                        vTaskDelay(1000/portTICK_PERIOD_MS);
+                        break;
+                        case delay_medium:
+                        vTaskDelay(3000 / portTICK_PERIOD_MS);
+                        break;case delay_long:
+                        vTaskDelay(5000/portTICK_PERIOD_MS);
+                        break;
+                    }
+                    servo_set_duty(SERVO_DUTY_OFF);
+                    break;
+                }
+            }   
+        }
+        last_ignit = input_state.ignition_button;
+        vTaskDelay(25/portTICK_PERIOD_MS);
+    }
+}
+    
