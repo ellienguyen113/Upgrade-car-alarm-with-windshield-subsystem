@@ -67,6 +67,14 @@ static void init_gpio(const input_pins_t *in, const output_pins_t *out){
     (1ULL << out->buzzer);
     gpio_config(&io_conf);
 }
+
+static void read_inputs (inputs_state_t *state, const input_pins_t *pins){
+    state -> dseat = (gpio_get_level(pins->driver_seat)==0);
+    state -> pseat = (gpio_get_level(pins->passenger_seat)==0);
+    state -> dbelt = (gpio_get_level(pins->driver_seatbelt)==0);
+    state -> pbelt = (gpio_get_level(pins->passenger_seatbelt)==0);
+    state -> ignition_button = (gpio_get_level(pins->ignition_button)==0);
+}
 typedef enum {
     wiper_off,
     wiper_low,
@@ -80,17 +88,18 @@ typedef enum{
     delay_long
 }
 delay_mode_t;
+
 #define THRESH_OFF_LOW     1023
 #define THRESH_LOW_HIGH    2046
 #define THRESH_HIGH_INT    3069
-wiper_mode_t decode_wiper_mode(uint16_t mode_adc){
-    if (mode_adc < THRESH_OFF_LOW){
+wiper_mode_t decode_wiper_mode(uint16_t wiper_mode){
+    if (wiper_mode < THRESH_OFF_LOW){
         return wiper_off;
     }
-    else if (mode_adc < THRESH_LOW_HIGH) {
+    else if (wiper_mode < THRESH_LOW_HIGH) {
         return wiper_low;
     }
-    else if (mode_adc < THRESH_HIGH_INT) {
+    else if (wiper_mode < THRESH_HIGH_INT) {
         return wiper_high;
     }
      else {
@@ -111,9 +120,14 @@ delay_mode_t decode_delay_mode(uint16_t delay_adc){
         return delay_long;
     }
 }
+#define ADC_CHANNEL_WIPER     ADC_CHANNEL_2
+#define ADC_CHANNEL_DELAY    ADC_CHANNEL_3
+#define ADC_ATTEN       ADC_ATTEN_DB_12
+#define BITWIDTH        ADC_BITWIDTH_12
+
 #define LEDC_TIMER              LEDC_TIMER_0
 #define LEDC_MODE               LEDC_LOW_SPEED_MODE
-#define LEDC_OUTPUT_IO          (8)
+#define LEDC_OUTPUT_IO          (15)
 #define LEDC_CHANNEL            LEDC_CHANNEL_0
 #define LEDC_DUTY_RES           LEDC_TIMER_13_BIT // Set duty resolution to 13 bits
 #define LEDC_FREQUENCY          (50) // Frequency in Hertz. 
@@ -151,20 +165,6 @@ static void servo_pwm_init(void)
     ledc_set_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,duty);
     ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0);
 }
-
-static void read_inputs (inputs_state_t *state, const input_pins_t *pins){
-    state -> dseat = (gpio_get_level(pins->driver_seat)==0);
-    state -> pseat = (gpio_get_level(pins->passenger_seat)==0);
-    state -> dbelt = (gpio_get_level(pins->driver_seatbelt)==0);
-    state -> pbelt = (gpio_get_level(pins->passenger_seatbelt)==0);
-    state -> ignition_button = (gpio_get_level(pins->ignition_button)==0);
-}
-
-#define ADC_CHANNEL_WIPER     ADC_CHANNEL_2
-#define ADC_CHANNEL_DELAY    ADC_CHANNEL_3
-#define ADC_ATTEN       ADC_ATTEN_DB_12
-#define BITWIDTH        ADC_BITWIDTH_12
-#define NUM_SAMPLES     1000                // Number of samples
 
 // LCD DISPLAY
 
@@ -223,7 +223,6 @@ void app_main(void)
     adc_oneshot_config_channel(adc_handle, ADC_CHANNEL_WIPER, &config);
     adc_oneshot_config_channel(adc_handle, ADC_CHANNEL_DELAY, &config);
 
-
     init_gpio(&inputs, &outputs);
     inputs_state_t input_state = {0};
     lcd_init_once();
@@ -235,16 +234,9 @@ void app_main(void)
     bool welcome_not_shown = true;  //Ensures welcome message prints once
     bool wiper_active = false;
     while(1){
+
         read_inputs(&input_state, &inputs);
-        int wiper_bits;                                   // ADC reading (bits)
-        adc_oneshot_read(adc_handle, ADC_CHANNEL_WIPER, &wiper_bits);      
 
-        int delay_bits;                                   // ADC reading (bits)
-        adc_oneshot_read(adc_handle, ADC_CHANNEL_DELAY, &delay_bits);     
-
-        wiper_mode_t wiper_mode = decode_wiper_mode(wiper_bits);
-        delay_mode_t delay_mode = decode_delay_mode(delay_bits);
-       
         // STAGE 1: ENGINE NOT RUNNING
         if (!engine_running){
             //Welcome message
@@ -305,40 +297,103 @@ void app_main(void)
                     gpio_set_level(outputs.engine_led,0);
                 }            
                 //WINDSHIELD 
-                switch(wiper_mode){
-                    case wiper_off:
-                    wiper_active = false;
-                    servo_set_duty(SERVO_DUTY_OFF);
-                    break;
-                    case wiper_low:
-                    wiper_active = true;
-                    servo_set_duty(SERVO_DUTY_LOW);
-                    break;
-                    case wiper_high:
-                    wiper_active = true;
-                    servo_set_duty(SERVO_DUTY_HIGH);
-                    break;
-                    case wiper_intermittent:
-                    wiper_active = true;
-                    servo_set_duty(SERVO_DUTY_LOW);
-                    lcd_intermittent(&lcd, delay_mode);
-                    switch(delay_mode){
-                        case delay_short:
-                        vTaskDelay(1000/portTICK_PERIOD_MS);
-                        break;
-                        case delay_medium:
-                        vTaskDelay(3000 / portTICK_PERIOD_MS);
-                        break;case delay_long:
-                        vTaskDelay(5000/portTICK_PERIOD_MS);
-                        break;
-                    }
-                    servo_set_duty(SERVO_DUTY_OFF);
-                    break;
+                int wiper_bits = 0, delay_bits = 0;
+                ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, ADC_CHANNEL_WIPER, &wiper_bits));
+                ESP_ERROR_CHECK(adc_oneshot_read(adc_handle, ADC_CHANNEL_DELAY, &delay_bits));
+
+                wiper_mode_t mode = decode_wiper_mode((uint16_t)wiper_bits);
+                delay_mode_t dmode = decode_delay_mode((uint16_t)delay_bits);
+
+                // If mode changed, reset cycle state so it reacts immediately
+                if (mode != last_mode) {
+                    int_reached_max = false;
+                    pause_until = 0;
+                    dir = +1;
+                    last_mode = mode;
                 }
-            }   
+
+                // OFF: park at 0 degree
+                if (mode == wiper_off) {
+                    duty = SERVO_DUTY_OFF;
+                    dir = +1;
+                    int_reached_max = false;
+                    pause_until = 0;
+                    servo_set_duty((uint32_t)duty);
+                    vTaskDelay(50/portTICK_PERIOD_MS);
+                    continue;
+                }
+
+                // Intermittent pause handling (non-blocking, so switching modes still works)
+                TickType_t now = xTaskGetTickCount();
+                if (mode == wiper_intermittent && pause_until != 0 && now < pause_until) {
+                    duty = (int)SERVO_DUTY_OFF;
+                    servo_set_duty((uint32_t)duty);
+                    vTaskDelay(50/portTICK_PERIOD_MS);  // check knob frequently during pause
+                    continue;
+                } 
+                else if (mode == wiper_intermittent) {
+                    pause_until = 0; // pause finished 
+                }
+                // Choose bounds and speed
+                int minD = SERVO_DUTY_OFF;
+                int maxD;
+                int step;
+                int step_ms;
+
+                if (mode == wiper_low) {
+                    maxD = SERVO_DUTY_LOW;   // 0 <-> 60
+                    step = 10;
+                    step_ms = 25;
+                } 
+                else if (mode == wiper_high) {
+                    maxD = SERVO_DUTY_HIGH;  // 0 <-> 90
+                    step = 15;
+                    step_ms = 20;
+                } 
+                else { // intermittent sweep uses 0 <-> 60
+                    maxD = SERVO_DUTY_LOW;
+                    step = 10;
+                    step_ms = 20;
+                }
+
+                // One tick of back-and-forth motion
+                duty += dir * step;
+
+                if (duty >= maxD) {
+                    duty = maxD;
+                    dir = -1;
+                    if (mode == wiper_intermittent){
+                        int_reached_max = true;
+                    }
+                } 
+                else if (duty <= minD) {
+                    duty = minD;
+                    dir = +1;
+
+                    // If intermittent: after completing a full 0->max->0 cycle, start pause
+                    if (mode == wiper_intermittent && int_reached_max) {
+                        int pause_ms;
+                    if (dmode == delay_short) {
+                        pause_ms = 1000;
+                    } 
+                    else if (dmode == delay_medium) {
+                        pause_ms = 3000;
+                    }
+                    else {
+                        pause_ms = 5000;
+                    }
+
+                    pause_until = xTaskGetTickCount() + pdMS_TO_TICKS(pause_ms);
+                    int_reached_max = false;  // reset for next wipe
+                }
+            }
+
+            servo_set_duty((uint32_t)duty);
+            vTaskDelay(pdMS_TO_TICKS(step_ms));
+            last_ignit = input_state.ignition_button;
+            vTaskDelay(25/portTICK_PERIOD_MS);
+            }
         }
-        last_ignit = input_state.ignition_button;
-        vTaskDelay(25/portTICK_PERIOD_MS);
     }
 }
     
