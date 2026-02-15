@@ -37,7 +37,7 @@ Car alarm/ignition lock
 |If the engine is running, and the user selects HI, LO, INT, or OFF, run the wipers in the appropriate mode, with the typical parameter values, as described above. Read the desired delay time for INT mode from the intermittent delay time selector. Do not run the wipers if the engine is not running.|User selects a mode while engine is running and selects a mode while the engine is not running| The servo exhibits the correct behavior for the selected mode|if the engine is running. If the engine is off, the wiper doesn't move|
 |If the engine is running, and the user selects HI, LO, INT, or OFF, display the selected mode, including the delay time selection (SHORT, MEDIUM, or LONG) for intermittent mode on the LCD. |User selects a mode, verify that delay is only displayed for INT mode| Selected Mode is displayed on the LCD, and when in the INT mode, selected delay mode is displayed|
 |If the wiper mode selector is turned to OFF, or the engine is turned off, then if the wiper is moving, in any mode, complete the current cycle and return the wipers to 0 degrees;|1. Turn the wiper mode off from one of the other modes. 2. Turn off the engine while the wiper is on| Both result in the current cycle being completed and the wipers returning to 0 degrees|
-|If the wiper mode selector is turned to OFF, or the engine is turned off, then if the wiper is hesitating in INT mode, remain stationary.|||
+|If the wiper mode selector is turned to OFF, or the engine is turned off, then if the wiper is hesitating in INT mode, remain stationary.|While mid-sweep, switch to OFF / stop engine; observe whether it finishes current sweep then parks.||
 
 
 
