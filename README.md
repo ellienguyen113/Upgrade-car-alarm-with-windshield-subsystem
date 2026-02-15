@@ -26,17 +26,17 @@ Car alarm/ignition lock
 | Specification | Test Process | Result |
 |-|-|-|
 |When the driver sits down, display the message, “Welcome to enhanced alarm system model 218-W26”. | Engine OFF. Press the driver seat input to “occupied.” |Welcome message is displayed once|
-|Indicate ignition is enabled with the green LED only when both seats are occupied and both seatbelts are fastened.|Try all combinations of seat/belt inputs|Green LED only turns on when both seat inputs and both seatbelt inputs are toggled | 
-|If the ignition enabled (green LED) is lit, then normal ignition occurs. Light the blue LED and extinguish the green LED. Display the message, “Engine started.”| Press the ignition button when the Green LED is on | Blue LED is activated, and the green LED is turned off. Engine on message is displayed once| |
-|If the ignition is not enabled (green LED not lit), then ignition is inhibited. Sound the alarm buzzer; display the message, “Ignition inhibited,” and display all the reasons why the ignition was inhibited: “Passenger seat not occupied,” “Driver seatbelt not fastened,” etc. Once the error messages are displayed, the system allows additional start attempts.  |||
-|Keep the engine running even if the driver or passenger should remove their seat belts or exit the vehicle.| | | 
-|When the engine is running, stop the engine when the ignition button is pushed.|||
+|Indicate ignition is enabled with the green LED only when both seats are occupied, and both seatbelts are fastened.|Try all combinations of seat/belt inputs|Green LED only turns on when both seat inputs and both seatbelt inputs are toggled | 
+|If the ignition enabled (green LED) is lit, then normal ignition occurs. Light the blue LED and extinguish the green LED. Display the message, “Engine started.”| Press the ignition button when the Green LED is on | Blue LED is activated, and the green LED is turned off. "Engine on" message is displayed once|
+|If the ignition is not enabled (green LED not lit), then ignition is inhibited. Sound the alarm buzzer; display the message, “Ignition inhibited,” and display all the reasons why the ignition was inhibited: “Passenger seat not occupied,” “Driver seatbelt not fastened,” etc. Once the error messages are displayed, the system allows additional start attempts.  | Press the ignition button while various requirements are not met|Alarm is turned on, "ignition inhibited" is displayed, and the corresponding errors are displayed|
+|Keep the engine running even if the driver or passenger should remove their seat belts or exit the vehicle.| Engine is on, toggle the seatbelt and occupancy buttons | Engine remains running| 
+|When the engine is running, stop the engine when the ignition button is pushed.|Engine is on, ignition button is pressed| Engine light turns off|
 
 | Specification | Test Process | Result |
 |---|---|---|
-|If the engine is running, and the user selects HI, LO, INT, or OFF, run the wipers in the appropriate mode, with the typical parameter values, as described above. Read the desired delay time for INT mode from the intermittent delay time selector. Do not run the wipers if the engine is not running.|||
-|If the engine is running, and the user selects HI, LO, INT, or OFF, display the selected mode, including the delay time selection (SHORT, MEDIUM, or LONG) for intermittent mode on the LCD|||
-|If the wiper mode selector is turned to OFF, or the engine is turned off, then if the wiper is moving, in any mode, complete the current cycle and return the wipers to 0 degrees;|||
+|If the engine is running, and the user selects HI, LO, INT, or OFF, run the wipers in the appropriate mode, with the typical parameter values, as described above. Read the desired delay time for INT mode from the intermittent delay time selector. Do not run the wipers if the engine is not running.|User selects a mode while engine is running and selects a mode while the engine is not running| The servo exhibits the correct behavior for the selected mode|if the engine is running. If the engine is off, the wiper doesn't move|
+|If the engine is running, and the user selects HI, LO, INT, or OFF, display the selected mode, including the delay time selection (SHORT, MEDIUM, or LONG) for intermittent mode on the LCD. |User selects a mode, verify that delay is only displayed for INT mode| Selected Mode is displayed on the LCD, and when in the INT mode, selected delay mode is displayed|
+|If the wiper mode selector is turned to OFF, or the engine is turned off, then if the wiper is moving, in any mode, complete the current cycle and return the wipers to 0 degrees;|1. Turn the wiper mode off from one of the other modes. 2. Turn off the engine while the wiper is on| Both result in the current cycle being completed and the wipers returning to 0 degrees|
 |If the wiper mode selector is turned to OFF, or the engine is turned off, then if the wiper is hesitating in INT mode, remain stationary.|||
 
 
