@@ -10,7 +10,7 @@ This project implements an ignition lock/alarm system in addition to a windshiel
 The system detects driver and passenger seat occupancy, along with seatbelt inputs, to determine whether ignition is allowed.
 If the ignition button is pressed while any of the required conditions are not met, an alarm in the form of a buzzer will be triggered, the system will print the failed conditions, and ignition will be prevented.
 When the required conditions for ignition are met (i.e., both seats are occupied, and both seatbelts are engaged), a green LED will turn on, indicating ignition is possible. 
-Pressing the ignition while the green LED is active will "turn on" the engine, indicated by a blue LED.
+Pressing the ignition while the green LED is active will "turn on" the engine, indicated by a red LED.
 While the engine is running, a windshield wiper, driven by a servo motor, operates in one of four user-selected modes: HI, LO, INT, or OFF. The mode is selected via a potentiometer and is displayed on the LCD.
 For the intermittent mode (INT), a second potentiometer is used to select the delay, either short, medium, or long. While in this mode, the chosen delay is also displayed on the LCD. The wipers only run when the engine is
 is running and returns to 0 degrees when the off mode is selected, or the engine is turned off. 
