@@ -119,8 +119,8 @@ delay_mode_t decode_delay_mode(uint16_t delay_adc){
         return delay_long;
     }
 }
-#define ADC_CHANNEL_WIPER     ADC_CHANNEL_2
-#define ADC_CHANNEL_DELAY    ADC_CHANNEL_3
+#define ADC_CHANNEL_WIPER     ADC_CHANNEL_1
+#define ADC_CHANNEL_DELAY    ADC_CHANNEL_0
 #define ADC_ATTEN       ADC_ATTEN_DB_12
 #define BITWIDTH        ADC_BITWIDTH_12
 
@@ -130,9 +130,10 @@ delay_mode_t decode_delay_mode(uint16_t delay_adc){
 #define LEDC_CHANNEL            LEDC_CHANNEL_0
 #define LEDC_DUTY_RES           LEDC_TIMER_13_BIT // Set duty resolution to 13 bits
 #define LEDC_FREQUENCY          (50) // Frequency in Hertz. 
-#define SERVO_DUTY_OFF           ((8191*0.028)) // Set duty to 3.75%.
-#define SERVO_DUTY_LOW           ((8191*0.075)) // Set duty to 9.25%.
-#define SERVO_DUTY_HIGH          ((8191*0.1196)) // Set duty to 14.65%.
+#define SERVO_DUTY_0           ((8191*0.028)) // Set duty to 3.75%.
+#define SERVO_DUTY_180          ((8191*0.1196)) // Set duty to 14.65%.
+#define SERVO_DUTY_90    (SERVO_DUTY_0 + (SERVO_DUTY_180 - SERVO_DUTY_0)/2)
+
 
 static void servo_pwm_init(void);
 static void servo_pwm_init(void)
@@ -190,7 +191,7 @@ static const char *mode_show(wiper_mode_t m){
         case wiper_off:          return "OFF";
         case wiper_low:          return "LOW";
         case wiper_high:         return "HIGH";
-        case wiper_intermittent: return "INTERMITTENT";
+        case wiper_intermittent: return "INT";
         default:                 return "";
     }
 }
@@ -218,15 +219,15 @@ static void lcd_show_mode(hd44780_t *lcd, wiper_mode_t mode, delay_mode_t dmode)
         hd44780_puts(lcd, "DELAY: ");
         hd44780_puts(lcd, delay_show(dmode));
     } else {
-        // clear line 2 (20 spaces)
-        hd44780_puts(lcd, "                    ");
+        // clear line 2 (16 spaces)
+        hd44780_puts(lcd, "                ");
     }
 }
 
 void app_main(void)
 {
     adc_oneshot_unit_init_cfg_t init_config = {
-        .unit_id = ADC_UNIT_2,
+        .unit_id = ADC_UNIT_1,
     };
     adc_oneshot_unit_handle_t adc_handle;
     adc_oneshot_new_unit(&init_config, &adc_handle);
@@ -248,7 +249,7 @@ void app_main(void)
     bool last_ignit       = false;
     bool welcome_not_shown = true;
     //Wiper state 
-    int duty = (int)SERVO_DUTY_OFF;
+    int duty = (int)SERVO_DUTY_0;
     int dir  = +1;                        // +1 up, -1 down
     TickType_t pause_until = 0;           // INT pause end tick
     bool int_reached_max = false;         // for INT pause scheduling
@@ -256,7 +257,7 @@ void app_main(void)
     //Graceful stop state
     bool parking = false;                // finish cycle then park at 0
     bool reached_max_this_cycle = false; // must hit max once before coming back
-    int latched_maxD = (int)SERVO_DUTY_LOW;
+    int latched_maxD = (int)SERVO_DUTY_90;
     int latched_step = 10;
     int latched_step_ms = 25;
     //Engine shutdown request
@@ -297,7 +298,7 @@ void app_main(void)
                 }
             }
             // Park servo at 0 while engine is off
-            servo_set_duty((uint32_t)SERVO_DUTY_OFF);
+            servo_set_duty((uint32_t)SERVO_DUTY_0);
             last_ignit = input_state.ignition_button;
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
@@ -329,28 +330,28 @@ void app_main(void)
             last_mode = mode;
         }
         // Determine normal sweep params based on current mode 
-        int minD = (int)SERVO_DUTY_OFF;
-        int maxD = (int)SERVO_DUTY_LOW;
-        int step = 10;
-        int step_ms = 25;
+        int minD = (int)SERVO_DUTY_0;
+        int maxD = (int)SERVO_DUTY_90;
+        int range = maxD - minD;
 
-        if (mode == wiper_low) {
-            maxD = (int)SERVO_DUTY_LOW;   // 0 <-> 60
+        int step = 10;
+        int step_ms = 10;
+
+        if (mode == wiper_low || mode == wiper_intermittent) {
             step = 10;
-            step_ms = 25;
-        } else if (mode == wiper_high) {
-            maxD = (int)SERVO_DUTY_HIGH;  // 0 <-> 90
+         step_ms = (6000 * step) / (2 * range)/2;   // ~10 rpm
+        if (step_ms < 5) step_ms = 5;            // clamp for stability
+            }
+        else if (mode == wiper_high) {
             step = 15;
-            step_ms = 20;
-        } else if (mode == wiper_intermittent) {
-            maxD = (int)SERVO_DUTY_LOW;   // INT sweep uses 0 <-> 60
-            step = 10;
-            step_ms = 20;
-        } else {
+            step_ms = (2400 * step) / (2 * range)/2;   // ~25 rpm
+        if (step_ms < 5) step_ms = 5;
+        }
+        else {
             // mode == wiper_off
-            maxD = (int)SERVO_DUTY_LOW;
+            maxD = (int)SERVO_DUTY_90;   // keep normal sweep params during parking for smoothness
             step = 10;
-            step_ms = 20;
+            step_ms = 10;
         }
         // INT hesitation behavior
         TickType_t now = xTaskGetTickCount();
